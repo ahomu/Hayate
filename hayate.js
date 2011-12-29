@@ -7,10 +7,12 @@
 var Hayate;
 Hayate || (function(win, doc, loc, nav) {
 
+    "use strict";
+
     Hayate = queryAll;
 
     var oldIE   = /MSIE [678]/.test(nav.userAgent),
-        toArray = !!oldIE ? toArrayClone : toArraySlice,
+        toArray = !!oldIE ? toArrayCopy : toArraySlice,
         IE_FIX_ATTR = {
             'class'     : 'className',
             'for'       : 'htmlFor',
@@ -19,14 +21,17 @@ Hayate || (function(win, doc, loc, nav) {
             colspan     : 'colSpan',
             rowspan     : 'rowSpan',
             frameborder : 'frameBorder'
-    };
+        },
+        INDEXED_STORE = {},
+        INDEXED_COUNT = 0
+    ;
 
     /**
-     * ArrayっぽいObject(NodeList, HTMLCollection)を，Arrayに変換
+     * NodeList, HTMLCollectionを，Arrayに変換
      *
      * @param {Object} list
      */
-    function toArrayClone(list) {
+    function toArrayCopy(list) {
         var rv= new Array(list.length), i = list.length;
         for (; i-->0;)
             if (i in list) {
@@ -35,7 +40,7 @@ Hayate || (function(win, doc, loc, nav) {
         return rv;
     }
     /**
-     * ArrayっぽいObject(NodeList, HTMLCollection)を，Arrayに変換
+     * NodeList, HTMLCollectionを，Arrayに変換
      *
      * @param {Object} list
      */
@@ -43,6 +48,12 @@ Hayate || (function(win, doc, loc, nav) {
         return Array.prototype.slice.call(list);
     }
 
+    /**
+     * arrayにlistを加える
+     *
+     * @param {Array} array
+     * @param {Object} list
+     */
     function concatArray(array, list) {
         if (!oldIE) {
             return array.concat(Array.prototype.slice.call(list));
@@ -57,6 +68,24 @@ Hayate || (function(win, doc, loc, nav) {
         }
     }
 
+    /**
+     * 属性値を取得する
+     *
+     * @param elm
+     * @param key
+     */
+    function getAttr(elm, key) {
+        if (!!oldIE && key in IE_FIX_ATTR) {
+            key = IE_FIX_ATTR[key];
+        }
+        return elm.getAttribute(key);
+    }
+
+    /**
+     *
+     * @param expr
+     * @param root
+     */
     function queryAll(expr, root) {
         var exprStack, i,
             RE_CONCISE = /^([.#]?)[\w\-_]+$/,
@@ -70,7 +99,7 @@ Hayate || (function(win, doc, loc, nav) {
         }
 
         if (expr.indexOf(',') === -1) {
-            return _selector(expr, root);
+            rv = _selector(expr, root);
         } else {
             exprStack = expr.split(',');
 
@@ -79,17 +108,27 @@ Hayate || (function(win, doc, loc, nav) {
             while (expr = exprStack[i++]) {
                 rv = rv.concat(_selector(expr, root));
             }
-            return rv;
         }
+
+        // 要素のポジショニングを初期化
+        INDEXED_STORE = {};
+        INDEXED_COUNT = 0;
+
+        return rv;
     }
 
+    /**
+     *
+     * @param expr
+     * @param root
+     */
     function _selector(expr, root) {
         var i = 0,
             tokenGroup,
             token,
-            RE_STANDARD   = /^([a-z]*)([.#]?[a-zA-Z0-9-_]*)$/,
+            RE_STANDARD   = /^([a-z0-9*]*)([.#]?[\w_-]*)$/,
             RE_COMBINATOR = /^([>+~])?$/,
-            RE_ATTRIBUTE  = /^\[(.+?)([~^$*|!>])=(.+?)\]$/,
+            RE_ATTRIBUTE  = /^\[(.+?)([~^$*|!>]?=)(.+)\]$/,
             RE_PSEUDOS    = /^:([a-z-]+)\(?([a-z-+\d]*)\)?$/,
             matches,
             rv;
@@ -117,14 +156,13 @@ Hayate || (function(win, doc, loc, nav) {
             .replace(/^\s*|\s*$/g, '')
         ;
 
+        // 評価変数を初期化
+        rv = [root];
+
         // セレクタを評価単位に分割
         tokenGroup = expr.split(' ');
 
-        // 評価中変数を初期化
-        rv = [root];
-
         while (token = tokenGroup[i++]) {
-
             switch(token.charAt(0)) {
                 case '[':
                     // attribute
@@ -133,6 +171,8 @@ Hayate || (function(win, doc, loc, nav) {
                         //        [2] operator
                         //        [3] criterion
                         rv = _attribute(rv, matches[2], matches[1], matches[3]);
+                    } else {
+                        rv = _attribute(rv, '', token.replace(']', '').charAt(1), '');
                     }
                 break;
                 case ':':
@@ -157,26 +197,31 @@ Hayate || (function(win, doc, loc, nav) {
                     if (matches = RE_STANDARD.exec(token)) {
                         // matches[1] element tag
                         //        [2] class|ident
-                        if (!matches[2]) {
-                            rv = _tag(matches[1], rv);
-                        } else {
-                            switch (matches[2].charAt(0)) {
-                                case '#':
-                                    rv = _ident(matches[2].substr(1), root, matches[1]);
-                                break;
-                                case '.':
-                                    rv = _clazz(matches[2].substr(1), rv, matches[1]);
-                                break;
-                            }
+                        switch (matches[2].charAt(0)) {
+                            case '#':
+                                rv = _ident(matches[2].substr(1), root, matches[1]);
+                            break;
+                            case '.':
+                                rv = _class(matches[2].substr(1), rv, matches[1]);
+                            break;
+                            default :
+                                rv = _tag(matches[1], rv);
+                            break;
                         }
                     }
                 break;
             }
         }
-
         return rv;
     }
 
+    /**
+     * 短絡評価
+     * 簡潔なセレクタをより速く評価する
+     *
+     * @param {String} expr
+     * @param {Node} root
+     */
     function _concise(expr, root) {
         var rv = [];
         switch(expr.charAt(0)) {
@@ -184,7 +229,7 @@ Hayate || (function(win, doc, loc, nav) {
                 rv = _ident(expr.substr(1), root);
             break;
             case '.':
-                rv = _clazz(expr.substr(1), [root]);
+                rv = _class(expr.substr(1), [root]);
             break;
             default:
                 rv = _tag(expr, [root]);
@@ -220,14 +265,14 @@ Hayate || (function(win, doc, loc, nav) {
      * @param {Array} rootAry
      * @param {String} [tagName]
      */
-    function _clazz(clazz, rootAry, tagName) {
+    function _class(clazz, rootAry, tagName) {
         tagName  = tagName && tagName.toUpperCase();
 
         var rv = [], i = 0, root, tmp;
 
         while (root = rootAry[i++] ) {
             if (!root.getElementsByClassName) {
-                var elms    = root.getElementsByTagName('*'),
+                var elms    = root.getElementsByTagName(tagName || '*'),
                     evClass = [' ', clazz, ' '].join(''),
                     elClass = [' ', , ' '],
                     j       = 0,
@@ -236,9 +281,7 @@ Hayate || (function(win, doc, loc, nav) {
                 while (e = elms[j++]) {
                     elClass[1] = e.className;
                     if (elClass.join('').indexOf(evClass) !== -1) {
-                        if (!tagName || e.tagName === tagName) {
-                            rv.push(e);
-                        }
+                        rv.push(e);
                     }
                 }
             } else {
@@ -258,6 +301,11 @@ Hayate || (function(win, doc, loc, nav) {
         return rv;
     }
 
+    /**
+     *
+     * @param tagName
+     * @param rootAry
+     */
     function _tag(tagName, rootAry) {
         var rv = [], i = 0, root;
 
@@ -268,71 +316,249 @@ Hayate || (function(win, doc, loc, nav) {
         return rv;
     }
 
+    /**
+     * 属性セレクタ
+     * []内に記号類が混ざると撃沈するので単純な文字列を対象に使うつもりで（ようは低精度）
+     *
+     * @param elms
+     * @param opr
+     * @param attr
+     * @param crit
+     */
     function _attribute(elms, opr, attr, crit) {
         var rv = [], e, i = 0;
 
-        crit = opr === '~' ? ' '+opr+' '
-                           : opr;
-
+        opr = opr === '~' ? ' '+opr+' '
+                          : opr;
         switch (opr) {
-            case '' :
+            case '=' :
                 while (e = elms[i++]) {
                     if (getAttr(e, attr) === crit) {
                         rv.push(e);
                     }
                 }
-                break;
-            case '$':
+            break;
+            case '$=':
                 while (e = elms[i++]) {
                     if (new RegExp(crit+'$').test(getAttr(e, attr))) {
                         rv.push(e);
                     }
                 }
-                break;
-            case '^':
+            break;
+            case '^=':
                 while (e = elms[i++]) {
                     if (getAttr(e, attr).indexOf(crit) === 0) {
                         rv.push(e);
                     }
                 }
-                break;
-            case '*':
+            break;
+            case '*=':
                 while (e = elms[i++]) {
                     if (getAttr(e, attr).indexOf(crit) !== -1) {
                         rv.push(e);
                     }
                 }
-                break;
-            case '~':
+            break;
+            case '~=':
                 while (e = elms[i++]) {
                     if ((' '+getAttr(e, attr)+' ').indexOf(crit) !== -1) {
                         rv.push(e);
                     }
                 }
-                break;
-            case '|':
+            break;
+            case '|=':
                 while (e = elms[i++]) {
                     if (getAttr(e, attr) === crit) {
                         rv.push(e);
                     }
                 }
-                break;
+            break;
+            case '!='  :
+                while (e = elms[i++]) {
+                    if (getAttr(e, attr) !== crit) {
+                        rv.push(e);
+                    }
+                }
+            break;
+            case ''  :
+                while (e = elms[i++]) {
+                    if (getAttr(e, attr) !== '') {
+                        rv.push(e);
+                    }
+                }
+            break;
         }
         return rv;
     }
 
-    function _pseudos(elms, opr, arg) {
-        return elms;
+    /**
+     * 擬似クラスセレクタ
+     *
+     * :opr(arg)
+     * arg内にホワイトスペースが含まれない前提でパース
+     *
+     * @param elms
+     * @param pseudo
+     * @param arg
+     */
+    function _pseudos(elms, pseudo, arg) {
+
+        function _argParse(arg) {
+            // matches[1] index \d
+            //        [2] n     n
+            //        [3] sign  +|-
+            //        [4] num   \d
+            var RE_ARG_PARSE = /^(\d*)(n?)([+-]?)(\d*)$/,
+                matches = RE_ARG_PARSE.exec(arg),
+                rv = {
+                    i : ~~matches[1],
+                    n : !!matches[2],
+                    fix : !!matches[3] ? matches[3] === '+' ? -~~matches[4] : ~~matches[4]
+                                       : 0
+            };
+
+            if (rv.i === 0 && !!rv.n) {
+                rv.i = 1;
+            }
+
+            return rv;
+        }
+
+        var rv = [], i = 0, e,
+            flg, start, iter,
+            pe,
+            pos, node, args,
+            current;
+
+        // 予約語を変換
+        switch(arg) {
+            case 'even' :
+                arg = '2n';
+                break;
+            case 'odd'  :
+                arg = '2n-1';
+                break;
+        }
+
+        if (pseudo.indexOf('-') !== -1) {
+
+            var CONST_PSEUDO = {
+                'nth-child'        : 1,
+                'nth-last-child'   : 1,
+                'first-child'      : 2,
+                'last-child'       : 2,
+                'nth-of-type'      : 3,
+                'nth-last-of-type' : 3
+            };
+
+            if (pseudo.indexOf('last') === -1) {
+                flg   = 'ascIndexed';
+                start = 'firstChild';
+                iter  = 'nextSibling';
+            } else {
+                flg   = 'descIndexed';
+                start = 'lastChild';
+                iter  = 'previousSibling';
+            }
+
+            switch (CONST_PSEUDO[pseudo]) {
+                // nth-child, nth-last-child
+                case 1:
+                    args = _argParse(arg);
+
+                    while (e = elms[i++]) {
+                        // 親ノード単位でindex済みのフラグを記録する
+                        // セレクター走査後に，countとstoreは初期化される
+                        pe = e.parentNode;
+                        pe[flg] || (pe[flg] = ++INDEXED_COUNT);
+                        if (!INDEXED_STORE[pe[flg]]) {
+                            INDEXED_STORE[pe[flg]] = true;
+                            node = pe[start];
+                            pos  = 0;
+                            for (; node; node = node[iter]) {
+                                if (node.nodeType === 1) {
+                                    node.nodeIndex = ++pos;
+                                }
+                            }
+                        }
+
+                        current = e.nodeIndex + args.fix;
+                        if (!!args.n) {
+                            if (current % args.i === 0 && current / args.i >= 0) {
+                                rv.push(e);
+                            }
+                        } else {
+                            if (current === args.i) {
+                                rv.push(e);
+                            }
+                        }
+                    }
+                break;
+                // first-child, last-child
+                case 2:
+                    while (e = elms[i++]) {
+                        node = e.parentNode[start];
+                        for (; node; node = node[iter]) {
+                            if (node.nodeType === 1) {
+                                if (node === e) {
+                                    rv.push(e);
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                break;
+                // nth-of-type, nth-last-of-type
+                case 3:
+                break;
+                case 'first-of-type' :
+                case 'last-of-type' :
+                break;
+                case 'only-child' :
+                break;
+                case 'only-of-type' :
+                break;
+            }
+        } else {
+            switch (pseudo) {
+                case 'root' :
+                break;
+                case 'empty' :
+                break;
+                case 'link' :
+                break;
+                case 'visited' :
+                break;
+                case 'active' :
+                break;
+                case 'hover' :
+                break;
+                case 'focus' :
+                break;
+                case 'target' :
+                break;
+                case 'lang' :
+                break;
+                case 'enabled' :
+                break;
+                case 'disabled' :
+                break;
+                case 'checked' :
+                break;
+            }
+        }
+        return rv;
     }
 
+    /**
+     *
+     *
+     * @param elms
+     * @param comb
+     */
     function _combinator(elms, comb) {
         return elms;
     }
 
-    function getAttr(elm, key) {
-        if (!!oldIE && key in IE_FIX_ATTR) {
-            key = IE_FIX_ATTR[key];
-        }
-        return elm.getAttribute(key);
-    }
 })(window, document, location, navigator);
