@@ -23,9 +23,46 @@ Hayate || (function(win, doc, loc, nav) {
             frameborder : 'frameBorder'
         },
         INDEXED_STORE = {},
-        INDEXED_COUNT = 0
+        INDEXED_COUNT = 0,
+
+        PSEUDO_NTHCHILD   = 1,
+        PSEUDO_FLCHILD    = 2,
+        PSEUDO_NTHTYPE    = 3,
+        PSEUDO_FLTYPE     = 4,
+        PSEUDO_ONLYTYPE   = 5,
+
+        ATTRIBUTE_EQUAL   = 1,
+        ATTRIBUTE_END     = 2,
+        ATTRIBUTE_START   = 3,
+        ATTRIBUTE_CONTAIN = 4,
+        ATTRIBUTE_PART    = 5,
+        ATTRIBUTE_NOT     = 6,
+        ATTRIBUTE_HAS     = 7
     ;
 
+    var EVALUTE_PSEUDO = {
+        'only-child'       : PSEUDO_NTHCHILD,
+        'nth-child'        : PSEUDO_NTHCHILD,
+        'nth-last-child'   : PSEUDO_NTHCHILD,
+        'first-child'      : PSEUDO_FLCHILD,
+        'last-child'       : PSEUDO_FLCHILD,
+        'nth-of-type'      : PSEUDO_NTHTYPE,
+        'nth-last-of-type' : PSEUDO_NTHTYPE,
+        'first-of-type'    : PSEUDO_FLTYPE,
+        'last-of-type'     : PSEUDO_FLTYPE,
+        'only-of-type'     : PSEUDO_ONLYTYPE
+    },
+        EVALUTE_ATTRIBUTE = {
+        '='  : ATTRIBUTE_EQUAL,
+        '$=' : ATTRIBUTE_END,
+        '^=' : ATTRIBUTE_START,
+        '*=' : ATTRIBUTE_CONTAIN,
+        '~=' : ATTRIBUTE_PART,
+        '|=' : ATTRIBUTE_EQUAL,
+        '!=' : ATTRIBUTE_NOT,
+        ''   : ATTRIBUTE_HAS
+    };
+    
     /**
      * NodeList, HTMLCollectionを，Arrayに変換
      *
@@ -71,8 +108,9 @@ Hayate || (function(win, doc, loc, nav) {
     /**
      * 属性値を取得する
      *
-     * @param elm
-     * @param key
+     * @param {Node} elm
+     * @param {String} key
+     * @return {String}
      */
     function getAttr(elm, key) {
         if (!!oldIE && key in IE_FIX_ATTR) {
@@ -84,8 +122,9 @@ Hayate || (function(win, doc, loc, nav) {
     /**
      * クエリーセレクタ
      *
-     * @param expr
-     * @param root
+     * @param {String} expr
+     * @param {Node|Document} root
+     * @return {Array}
      */
     function query(expr, root) {
         var exprStack, i,
@@ -123,8 +162,9 @@ Hayate || (function(win, doc, loc, nav) {
     /**
      * querySelectorAllの代替
      *
-     * @param expr
-     * @param root
+     * @param {String} expr
+     * @param {Node|Document} root
+     * @return {Array}
      */
     function _selector(expr, root) {
         var i = 0,
@@ -143,7 +183,10 @@ Hayate || (function(win, doc, loc, nav) {
         }
 
         // 生のセレクタ文字列を加工
+        // @todo issue: pseudoやattributeの精度を高めるなら，ここの加工を濃くする
         expr = expr
+            // トリム
+            .replace(/^\s+/, '').replace(/\s+$/, '')
             // 2つ以上のスペースを1つに変換
             .replace(/\s{2,}/g, ' ')
             // クオーテーションを除去
@@ -156,8 +199,6 @@ Hayate || (function(win, doc, loc, nav) {
             .replace(/\s?\[/g, ' [')
             // pseudosの左脇にスペース
             .replace(/\s?:/g, ' :')
-            // trim
-            .replace(/^\s+/, '').replace(/\s+$/, '')
         ;
 
         // 評価変数を初期化
@@ -225,6 +266,7 @@ Hayate || (function(win, doc, loc, nav) {
      *
      * @param {String} expr
      * @param {Node} root
+     * @return {Array}
      */
     function _concise(expr, root) {
         var rv = [];
@@ -325,7 +367,20 @@ Hayate || (function(win, doc, loc, nav) {
     }
 
     /**
-     * 属性セレクタ
+     * 子・隣接・間接セレクタ
+     *
+     * @param {Array} elms
+     * @param {String} comb
+     */
+    function _combinator(elms, comb) {
+
+
+
+        return elms;
+    }
+
+    /**
+     * 属性セレクタ（フィルタリング）
      * []内に記号類が混ざると，事前パースの時点で撃沈するので単純な文字列を対象に使うつもりで（ようは低精度）
      *
      * @param {Array} elms
@@ -338,57 +393,51 @@ Hayate || (function(win, doc, loc, nav) {
 
         crit = opr === '~' ? ' '+crit+' '
                            : crit;
-        switch (opr) {
-            case '=' :
+
+        switch (EVALUTE_ATTRIBUTE[opr]) {
+            case ATTRIBUTE_EQUAL :
                 while (e = elms[i++]) {
                     if (getAttr(e, attr) === crit) {
                         rv.push(e);
                     }
                 }
             break;
-            case '$=':
+            case ATTRIBUTE_END:
                 while (e = elms[i++]) {
                     if (new RegExp(crit+'$').test(getAttr(e, attr))) {
                         rv.push(e);
                     }
                 }
             break;
-            case '^=':
+            case ATTRIBUTE_START:
                 while (e = elms[i++]) {
                     if (getAttr(e, attr).indexOf(crit) === 0) {
                         rv.push(e);
                     }
                 }
             break;
-            case '*=':
+            case ATTRIBUTE_CONTAIN:
                 while (e = elms[i++]) {
                     if (getAttr(e, attr).indexOf(crit) !== -1) {
                         rv.push(e);
                     }
                 }
             break;
-            case '~=':
+            case ATTRIBUTE_PART:
                 while (e = elms[i++]) {
                     if ((' '+getAttr(e, attr)+' ').indexOf(crit) !== -1) {
                         rv.push(e);
                     }
                 }
             break;
-            case '|=':
-                while (e = elms[i++]) {
-                    if (getAttr(e, attr) === crit) {
-                        rv.push(e);
-                    }
-                }
-            break;
-            case '!='  :
+            case ATTRIBUTE_NOT:
                 while (e = elms[i++]) {
                     if (getAttr(e, attr) !== crit) {
                         rv.push(e);
                     }
                 }
             break;
-            case ''  :
+            case ATTRIBUTE_HAS:
                 while (e = elms[i++]) {
                     if (getAttr(e, attr) !== '') {
                         rv.push(e);
@@ -400,7 +449,7 @@ Hayate || (function(win, doc, loc, nav) {
     }
 
     /**
-     * 擬似クラスセレクタ
+     * 擬似クラスセレクタ（フィルタリング）
      *
      * :opr(arg)
      * arg内にホワイトスペースが含まれない前提でパース
@@ -441,31 +490,19 @@ Hayate || (function(win, doc, loc, nav) {
             pos, node, args,
             current;
 
-        // 予約語を変換
-        switch(arg) {
-            case 'even' :
-                arg = '2n';
-            break;
-            case 'odd'  :
-                arg = '2n-1';
-            break;
-        }
-
         if (pseudo.indexOf('-') !== -1) {
 
-            var CONST_PSEUDO = {
-                'only-child'       : 1,
-                'nth-child'        : 1,
-                'nth-last-child'   : 1,
-                'first-child'      : 2,
-                'last-child'       : 2,
-                'nth-of-type'      : 3,
-                'nth-last-of-type' : 3,
-                'first-of-type'    : 4,
-                'last-of-type'     : 4,
-                'only-of-type'     : 5
-            };
+            // 予約語を変換
+            switch(arg) {
+                case 'even' :
+                    arg = '2n';
+                break;
+                case 'odd'  :
+                    arg = '2n-1';
+                break;
+            }
 
+            // イテレータ等の決定
             if (pseudo.indexOf('last') === -1) {
                 flg   = 'ascIndexed';
                 start = 'firstChild';
@@ -476,8 +513,8 @@ Hayate || (function(win, doc, loc, nav) {
                 iter  = 'previousSibling';
             }
 
-            switch (CONST_PSEUDO[pseudo]) {
-                case 1: // nth-child, nth-last-child, only-child
+            switch (EVALUTE_PSEUDO[pseudo]) {
+                case PSEUDO_NTHCHILD: // nth-child, nth-last-child, only-child
                     args = _argParse(arg);
 
                     while (e = elms[i++]) {
@@ -520,7 +557,7 @@ Hayate || (function(win, doc, loc, nav) {
                         }
                     }
                 break;
-                case 2: // first-child, last-child
+                case PSEUDO_FLCHILD: // first-child, last-child
                     while (e = elms[i++]) {
                         node = e.parentNode[start];
                         for (; node; node = node[iter]) {
@@ -534,9 +571,9 @@ Hayate || (function(win, doc, loc, nav) {
                         }
                     }
                 break;
-                case 3: // nth-of-type, nth-last-of-type
-                case 4: // first-of-type, last-of-type
-                case 5: // only-of-type
+                case PSEUDO_NTHTYPE: // nth-of-type, nth-last-of-type
+                case PSEUDO_FLTYPE: // first-of-type, last-of-type
+                case PSEUDO_ONLYTYPE: // only-of-type
                     throw new Error("pseudo 'of-type's are not implmented.");
                 break;
             }
@@ -570,15 +607,4 @@ Hayate || (function(win, doc, loc, nav) {
         }
         return rv;
     }
-
-    /**
-     * 子・隣接・関節セレクタ
-     *
-     * @param {Array} elms
-     * @param {String} comb
-     */
-    function _combinator(elms, comb) {
-        return elms;
-    }
-
 })(window, document, location, navigator);
