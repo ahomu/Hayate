@@ -128,16 +128,19 @@ Hayate || (function(win, doc, loc, nav) {
      */
     function query(expr, root) {
         var exprStack, i,
-            RE_CONCISE = /^([.#]?)[\w\-_]+$/,
-            rv;
+            RE_CONCISE = /^([a-z0-6]*)([.#]?)([\w\-_]*)$/,
+            matches, rv;
 
         // @todo issue: 適宜ネイティブのquerySelectorAllと分岐する(IE8はpseudoの実装が半端なので注意)
 
         root = root || doc;
 
         // 短絡評価が可能なら済ませる
-        if (RE_CONCISE.test(expr)) {
-            return _concise(expr, root);
+        if (matches = RE_CONCISE.exec(expr)) {
+            // matches[1] tagName
+            //        [2] by
+            //        [3] specifier
+            return _concise(matches[1] || '*', root, matches[3], matches[2]);
         }
 
         if (expr.indexOf(',') === -1) {
@@ -170,10 +173,11 @@ Hayate || (function(win, doc, loc, nav) {
         var i = 0,
             tokenGroup,
             token,
-            RE_PARSE_STANDARD   = /^([a-z0-9*]*)([.#]?[\w_-]*)$/,
-            RE_PARSE_COMBINATOR = /^([>+~])?$/,
-            RE_PARSE_ATTRIBUTE  = /^\[(.+?)([~^$*|!>]?=)(.+)\]$/,
-            RE_PARSE_PSEUDO     = /^:([a-z-]+)\(?([a-z-+\d]*)\)?$/,
+            RE_DETECT_COMBINATOR = /^([>+~])/,
+            RE_DETECT_TAGNAME    = /^([a-z0-6]+)[#.[:]?/,
+            RE_DETECT_SPECIFIER  = /^([#.])([a-zA-Z0-9-_]+)/,
+            RE_PARSE_ATTRIBUTE   = /^\[(.+?)([~^$*|!>]?=)(.+)\]$/,
+            RE_PARSE_PSEUDO      = /^:([a-z-]+)\(?([a-z-+\d]*)\)?$/,
             matches,
             rv;
 
@@ -191,14 +195,10 @@ Hayate || (function(win, doc, loc, nav) {
             .replace(/\s{2,}/g, ' ')
             // クオーテーションを除去
             .replace(/['"]/g, '')
-            // combinatorの左脇にスペース
+            // combinatorの左脇にのみスペース
             .replace(/\s?>\s?/g, ' >')
             .replace(/\s?~\s?([^=])/g, ' ~$1')    // [attr~="\w"]でない
             .replace(/\s?\+\s?([^\d])/g, ' +$1')  // :pusedo(n+\d)でない
-            // attributeの左脇にスペース
-            .replace(/\s?\[/g, ' [')
-            // pseudosの左脇にスペース
-            .replace(/\s?:/g, ' :')
         ;
 
         // 評価変数を初期化
@@ -207,55 +207,69 @@ Hayate || (function(win, doc, loc, nav) {
         // セレクタを評価単位に分割
         tokenGroup = expr.split(' ');
 
+        var combinator, tagName, traversal, specifier,
+            filterGroup, filter, fi;
+
         while (token = tokenGroup[i++]) {
-            switch(token.charAt(0)) {
-                case '[':
-                    // attribute
-                    if (matches = RE_PARSE_ATTRIBUTE.exec(token)) {
-                        // matches[1] attribute
-                        //        [2] operator
-                        //        [3] criterion
-                        rv = _attribute(rv, matches[2], matches[1], matches[3]);
-                    } else {
-                        rv = _attribute(rv, '', token.replace(']', '').charAt(1), '');
-                    }
-                break;
-                case ':':
-                    // pseudos
-                    if (matches = RE_PARSE_PSEUDO.exec(token)) {
-                        // matches[1] pseudo
-                        //        [2] argutment
-                        rv = _pseudos(rv, matches[1], matches[2]);
-                    }
-                break;
-                case '>':
-                case '~':
-                case '+':
-                    // combinator
-                    rv = _combinator(rv, token.charAt(0));
+            // default
+            combinator = '';
+            tagName    = '*';
+            traversal  = _tag;
+            specifier  = '';
 
-                    // remove combinator
-                    token = token.substr(1);
-
-                    // through down
-                default :
-                    if (matches = RE_PARSE_STANDARD.exec(token)) {
-                        // matches[1] element tag
-                        //        [2] class|ident
-                        switch (matches[2].charAt(0)) {
-                            case '#':
-                                rv = _ident(matches[2].substr(1), root, matches[1]);
-                            break;
-                            case '.':
-                                rv = _class(matches[2].substr(1), rv, matches[1]);
-                            break;
-                            default :
-                                rv = _tag(matches[1], rv);
-                            break;
-                        }
-                    }
-                break;
+            // combinator
+            if (RE_DETECT_COMBINATOR.test(token)) {
+                combinator = RegExp.$1;
+                token      = token.substr(1);
             }
+
+            // tagName
+            if (RE_DETECT_TAGNAME.test(token)) {
+                tagName = RegExp.$1;
+                token   = token.substr(tagName.length);
+            }
+
+            // specifier
+            if (RE_DETECT_SPECIFIER.test(token)) {
+                traversal = RegExp.$1 === '#' ? _ident : _class;
+                specifier = RegExp.$2;
+                token     = token.substr(specifier.length+1);
+            }
+
+            // traversal
+            // @todo issue: combinatorを考慮
+            rv = traversal(tagName, rv, specifier);
+
+            // filter (pseudo & attribute)
+            if (!!token) {
+                filterGroup = token.replace(/([[:])/g, ' $1').substr(1).split(' ');
+                fi = 0;
+                while (filter = filterGroup[fi++]) {
+
+                    switch(filter.charAt(0)) {
+                        case '[':
+                            // attribute
+                            if (matches = RE_PARSE_ATTRIBUTE.exec(filter)) {
+                                // matches[1] attribute
+                                //        [2] operator
+                                //        [3] criterion
+                                rv = _attribute(rv, matches[2], matches[1], matches[3]);
+                            } else {
+                                rv = _attribute(rv, '', filter.slice(1, -1), '');
+                            }
+                        break;
+                        case ':':
+                            // pseudos
+                            if (matches = RE_PARSE_PSEUDO.exec(filter)) {
+                                // matches[1] pseudo
+                                //        [2] argutment
+                                rv = _pseudos(rv, matches[1], matches[2]);
+                            }
+                        break;
+                    }
+                }
+            }
+
         }
         return rv;
     }
@@ -264,21 +278,23 @@ Hayate || (function(win, doc, loc, nav) {
      * 短絡評価
      * 簡潔なセレクタをより速く評価する
      *
-     * @param {String} expr
+     * @param {String} tagName
      * @param {Node} root
+     * @param {String} specifier
+     * @param {String} by
      * @return {Array}
      */
-    function _concise(expr, root) {
+    function _concise(tagName, root, specifier, by) {
         var rv = [];
-        switch(expr.charAt(0)) {
+        switch(by) {
             case '#':
-                rv = _ident(expr.substr(1), root);
+                rv = _ident(tagName, [root], specifier);
             break;
             case '.':
-                rv = _class(expr.substr(1), [root]);
+                rv = _class(tagName, [root], specifier);
             break;
             default:
-                rv = _tag(expr, [root]);
+                rv = _tag(tagName, [root]);
             break;
         }
         return rv;
@@ -287,20 +303,20 @@ Hayate || (function(win, doc, loc, nav) {
     /**
      * IDセレクタ
      *
+     * @param {String} tagName
+     * @param {Array} root (document nodeがroot[0]に入ってくる前提)
      * @param {String} ident
-     * @param {Node} root
-     * @param {String} [tagName]
      * @return {Array}
      */
-    function _ident(ident, root, tagName) {
+    function _ident(tagName, root, ident) {
         var rv;
 
-        tagName = tagName && tagName.toUpperCase();
-        root    = root.nodeType === 9 ? root : root.ownerDocument;
+        tagName = tagName.toUpperCase();
+        root    = root[0].nodeType === 9 ? root[0] : root[0].ownerDocument;
 
         rv = root.getElementById(ident);
 
-        if (rv && !tagName || rv && rv.tagName === tagName) {
+        if (rv && tagName === '*' || rv && rv.tagName === tagName) {
             return [rv];
         } else {
             return []
@@ -310,31 +326,32 @@ Hayate || (function(win, doc, loc, nav) {
     /**
      * クラスセレクタ
      *
-     * @param {String} clazz
+     * @param {String} tagName
      * @param {Array} rootAry
-     * @param {String} [tagName]
+     * @param {String} clazz
      * @return {Array}
      */
-    function _class(clazz, rootAry, tagName) {
+    function _class(tagName, rootAry, clazz) {
         var rv = [], i = 0, root, tmp;
 
-        tagName  = tagName && tagName.toUpperCase();
+        tagName  = tagName.toUpperCase();
 
         while (root = rootAry[i++] ) {
             if (!root.getElementsByClassName) {
-                var elms    = root.getElementsByTagName(tagName || '*'),
+                var elms    = root.getElementsByTagName(tagName),
                     evClass = ' '+clazz+' ',
                     j       = 0,
                     e;
 
                 while (e = elms[j++]) {
-                    if ((''+e.className+'').indexOf(evClass) !== -1) {
+                    if ((' '+e.className+' ').indexOf(evClass) !== -1) {
                         rv.push(e);
                     }
                 }
             } else {
                 tmp = toArray(root.getElementsByClassName(clazz));
-                if (tagName) {
+                if (tagName !== '*') {
+                    console.log(tagName);
                     var k = 0, r;
                     while (r = tmp[k++]) {
                         if (r.tagName === tagName) {
