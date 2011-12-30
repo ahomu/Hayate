@@ -9,7 +9,7 @@ Hayate || (function(win, doc, loc, nav) {
 
     "use strict";
 
-    Hayate = queryAll;
+    Hayate = query;
 
     var oldIE   = /MSIE [678]/.test(nav.userAgent),
         toArray = !!oldIE ? toArrayCopy : toArraySlice,
@@ -82,14 +82,17 @@ Hayate || (function(win, doc, loc, nav) {
     }
 
     /**
+     * クエリーセレクタ
      *
      * @param expr
      * @param root
      */
-    function queryAll(expr, root) {
+    function query(expr, root) {
         var exprStack, i,
             RE_CONCISE = /^([.#]?)[\w\-_]+$/,
             rv;
+
+        // @todo issue: 適宜ネイティブのquerySelectorAllと分岐する(IE8はpseudoの実装が半端なので注意)
 
         root = root || doc;
 
@@ -110,7 +113,7 @@ Hayate || (function(win, doc, loc, nav) {
             }
         }
 
-        // 要素のポジショニングを初期化
+        // 要素のインデックスを初期化
         INDEXED_STORE = {};
         INDEXED_COUNT = 0;
 
@@ -118,6 +121,7 @@ Hayate || (function(win, doc, loc, nav) {
     }
 
     /**
+     * querySelectorAllの代替
      *
      * @param expr
      * @param root
@@ -126,19 +130,19 @@ Hayate || (function(win, doc, loc, nav) {
         var i = 0,
             tokenGroup,
             token,
-            RE_STANDARD   = /^([a-z0-9*]*)([.#]?[\w_-]*)$/,
-            RE_COMBINATOR = /^([>+~])?$/,
-            RE_ATTRIBUTE  = /^\[(.+?)([~^$*|!>]?=)(.+)\]$/,
-            RE_PSEUDOS    = /^:([a-z-]+)\(?([a-z-+\d]*)\)?$/,
+            RE_PARSE_STANDARD   = /^([a-z0-9*]*)([.#]?[\w_-]*)$/,
+            RE_PARSE_COMBINATOR = /^([>+~])?$/,
+            RE_PARSE_ATTRIBUTE  = /^\[(.+?)([~^$*|!>]?=)(.+)\]$/,
+            RE_PARSE_PSEUDO     = /^:([a-z-]+)\(?([a-z-+\d]*)\)?$/,
             matches,
             rv;
 
         // IDがあればそれ以前を切り取る
         if (expr.indexOf('#')) {
-            expr = expr.replace(/^.*?([a-z]*#.+)$/, '$1');
+            expr = expr.replace(/^.*?([a-z0-9*]*#.+)$/, '$1');
         }
 
-        // 生のセレクタストリングを加工
+        // 生のセレクタ文字列を加工
         expr = expr
             // 2つ以上のスペースを1つに変換
             .replace(/\s{2,}/g, ' ')
@@ -153,7 +157,7 @@ Hayate || (function(win, doc, loc, nav) {
             // pseudosの左脇にスペース
             .replace(/\s?:/g, ' :')
             // trim
-            .replace(/^\s*|\s*$/g, '')
+            .replace(/^\s+/, '').replace(/\s+$/, '')
         ;
 
         // 評価変数を初期化
@@ -166,7 +170,7 @@ Hayate || (function(win, doc, loc, nav) {
             switch(token.charAt(0)) {
                 case '[':
                     // attribute
-                    if (matches = RE_ATTRIBUTE.exec(token)) {
+                    if (matches = RE_PARSE_ATTRIBUTE.exec(token)) {
                         // matches[1] attribute
                         //        [2] operator
                         //        [3] criterion
@@ -177,7 +181,7 @@ Hayate || (function(win, doc, loc, nav) {
                 break;
                 case ':':
                     // pseudos
-                    if (matches = RE_PSEUDOS.exec(token)) {
+                    if (matches = RE_PARSE_PSEUDO.exec(token)) {
                         // matches[1] pseudo
                         //        [2] argutment
                         rv = _pseudos(rv, matches[1], matches[2]);
@@ -194,7 +198,7 @@ Hayate || (function(win, doc, loc, nav) {
 
                     // through down
                 default :
-                    if (matches = RE_STANDARD.exec(token)) {
+                    if (matches = RE_PARSE_STANDARD.exec(token)) {
                         // matches[1] element tag
                         //        [2] class|ident
                         switch (matches[2].charAt(0)) {
@@ -239,10 +243,12 @@ Hayate || (function(win, doc, loc, nav) {
     }
 
     /**
+     * IDセレクタ
      *
      * @param {String} ident
-     * @param {Element} root
+     * @param {Node} root
      * @param {String} [tagName]
+     * @return {Array}
      */
     function _ident(ident, root, tagName) {
         var rv;
@@ -260,27 +266,27 @@ Hayate || (function(win, doc, loc, nav) {
     }
 
     /**
+     * クラスセレクタ
      *
      * @param {String} clazz
      * @param {Array} rootAry
      * @param {String} [tagName]
+     * @return {Array}
      */
     function _class(clazz, rootAry, tagName) {
-        tagName  = tagName && tagName.toUpperCase();
-
         var rv = [], i = 0, root, tmp;
+
+        tagName  = tagName && tagName.toUpperCase();
 
         while (root = rootAry[i++] ) {
             if (!root.getElementsByClassName) {
                 var elms    = root.getElementsByTagName(tagName || '*'),
-                    evClass = [' ', clazz, ' '].join(''),
-                    elClass = [' ', , ' '],
+                    evClass = ' '+clazz+' ',
                     j       = 0,
                     e;
 
                 while (e = elms[j++]) {
-                    elClass[1] = e.className;
-                    if (elClass.join('').indexOf(evClass) !== -1) {
+                    if ((''+e.className+'').indexOf(evClass) !== -1) {
                         rv.push(e);
                     }
                 }
@@ -302,9 +308,11 @@ Hayate || (function(win, doc, loc, nav) {
     }
 
     /**
+     * タグセレクタ
      *
-     * @param tagName
-     * @param rootAry
+     * @param {String} tagName
+     * @param {Array} rootAry
+     * @return {Array}
      */
     function _tag(tagName, rootAry) {
         var rv = [], i = 0, root;
@@ -318,18 +326,18 @@ Hayate || (function(win, doc, loc, nav) {
 
     /**
      * 属性セレクタ
-     * []内に記号類が混ざると撃沈するので単純な文字列を対象に使うつもりで（ようは低精度）
+     * []内に記号類が混ざると，事前パースの時点で撃沈するので単純な文字列を対象に使うつもりで（ようは低精度）
      *
-     * @param elms
-     * @param opr
-     * @param attr
-     * @param crit
+     * @param {Array} elms
+     * @param {String} opr
+     * @param {String} attr
+     * @param {String} crit
      */
     function _attribute(elms, opr, attr, crit) {
         var rv = [], e, i = 0;
 
-        opr = opr === '~' ? ' '+opr+' '
-                          : opr;
+        crit = opr === '~' ? ' '+crit+' '
+                           : crit;
         switch (opr) {
             case '=' :
                 while (e = elms[i++]) {
@@ -397,12 +405,17 @@ Hayate || (function(win, doc, loc, nav) {
      * :opr(arg)
      * arg内にホワイトスペースが含まれない前提でパース
      *
-     * @param elms
-     * @param pseudo
-     * @param arg
+     * @param {Array} elms
+     * @param {String} pseudo
+     * @param {String} arg
      */
     function _pseudos(elms, pseudo, arg) {
 
+        /**
+         * nth-child等の引数をパースする
+         *
+         * @param {String} arg
+         */
         function _argParse(arg) {
             // matches[1] index \d
             //        [2] n     n
@@ -416,11 +429,9 @@ Hayate || (function(win, doc, loc, nav) {
                     fix : !!matches[3] ? matches[3] === '+' ? -~~matches[4] : ~~matches[4]
                                        : 0
             };
-
             if (rv.i === 0 && !!rv.n) {
                 rv.i = 1;
             }
-
             return rv;
         }
 
@@ -434,21 +445,25 @@ Hayate || (function(win, doc, loc, nav) {
         switch(arg) {
             case 'even' :
                 arg = '2n';
-                break;
+            break;
             case 'odd'  :
                 arg = '2n-1';
-                break;
+            break;
         }
 
         if (pseudo.indexOf('-') !== -1) {
 
             var CONST_PSEUDO = {
+                'only-child'       : 1,
                 'nth-child'        : 1,
                 'nth-last-child'   : 1,
                 'first-child'      : 2,
                 'last-child'       : 2,
                 'nth-of-type'      : 3,
-                'nth-last-of-type' : 3
+                'nth-last-of-type' : 3,
+                'first-of-type'    : 4,
+                'last-of-type'     : 4,
+                'only-of-type'     : 5
             };
 
             if (pseudo.indexOf('last') === -1) {
@@ -462,8 +477,7 @@ Hayate || (function(win, doc, loc, nav) {
             }
 
             switch (CONST_PSEUDO[pseudo]) {
-                // nth-child, nth-last-child
-                case 1:
+                case 1: // nth-child, nth-last-child, only-child
                     args = _argParse(arg);
 
                     while (e = elms[i++]) {
@@ -480,22 +494,33 @@ Hayate || (function(win, doc, loc, nav) {
                                     node.nodeIndex = ++pos;
                                 }
                             }
+                            // posが1であればその要素はonly-childである
+                            if (pos === 1) {
+                                e.onlyChild = true;
+                            }
                         }
 
-                        current = e.nodeIndex + args.fix;
-                        if (!!args.n) {
-                            if (current % args.i === 0 && current / args.i >= 0) {
+                        // only-child
+                        if (pseudo.indexOf('only') !== -1) {
+                            if (e.onlyChild && e.onlyChild === true) {
                                 rv.push(e);
                             }
+                        // nth-child, nth-last-child
                         } else {
-                            if (current === args.i) {
-                                rv.push(e);
+                            current = e.nodeIndex + args.fix;
+                            if (!!args.n) {
+                                if (current % args.i === 0 && current / args.i >= 0) {
+                                    rv.push(e);
+                                }
+                            } else {
+                                if (current === args.i) {
+                                    rv.push(e);
+                                }
                             }
                         }
                     }
                 break;
-                // first-child, last-child
-                case 2:
+                case 2: // first-child, last-child
                     while (e = elms[i++]) {
                         node = e.parentNode[start];
                         for (; node; node = node[iter]) {
@@ -509,15 +534,10 @@ Hayate || (function(win, doc, loc, nav) {
                         }
                     }
                 break;
-                // nth-of-type, nth-last-of-type
-                case 3:
-                break;
-                case 'first-of-type' :
-                case 'last-of-type' :
-                break;
-                case 'only-child' :
-                break;
-                case 'only-of-type' :
+                case 3: // nth-of-type, nth-last-of-type
+                case 4: // first-of-type, last-of-type
+                case 5: // only-of-type
+                    throw new Error("pseudo 'of-type's are not implmented.");
                 break;
             }
         } else {
@@ -552,10 +572,10 @@ Hayate || (function(win, doc, loc, nav) {
     }
 
     /**
+     * 子・隣接・関節セレクタ
      *
-     *
-     * @param elms
-     * @param comb
+     * @param {Array} elms
+     * @param {String} comb
      */
     function _combinator(elms, comb) {
         return elms;
