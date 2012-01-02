@@ -25,6 +25,13 @@ Hayate || (function(win, doc, loc, nav) {
         INDEXED_STORE = {},
         INDEXED_COUNT = 0,
 
+        ELEMENT_UID  = 0,
+        COMBINATE_ID = 0,
+
+        COMBINATOR_CHILD           = 1,
+        COMBINATOR_SIBLING         = 2,
+        COMBINATOR_GENERAL_SIBLING = 3,
+
         PSEUDO_NTHCHILD   = 1,
         PSEUDO_FLCHILD    = 2,
         PSEUDO_NTHTYPE    = 3,
@@ -41,27 +48,33 @@ Hayate || (function(win, doc, loc, nav) {
     ;
 
     var EVALUTE_PSEUDO = {
-        'only-child'       : PSEUDO_NTHCHILD,
-        'nth-child'        : PSEUDO_NTHCHILD,
-        'nth-last-child'   : PSEUDO_NTHCHILD,
-        'first-child'      : PSEUDO_FLCHILD,
-        'last-child'       : PSEUDO_FLCHILD,
-        'nth-of-type'      : PSEUDO_NTHTYPE,
-        'nth-last-of-type' : PSEUDO_NTHTYPE,
-        'first-of-type'    : PSEUDO_FLTYPE,
-        'last-of-type'     : PSEUDO_FLTYPE,
-        'only-of-type'     : PSEUDO_ONLYTYPE
-    },
+            'only-child'       : PSEUDO_NTHCHILD,
+            'nth-child'        : PSEUDO_NTHCHILD,
+            'nth-last-child'   : PSEUDO_NTHCHILD,
+            'first-child'      : PSEUDO_FLCHILD,
+            'last-child'       : PSEUDO_FLCHILD,
+            'nth-of-type'      : PSEUDO_NTHTYPE,
+            'nth-last-of-type' : PSEUDO_NTHTYPE,
+            'first-of-type'    : PSEUDO_FLTYPE,
+            'last-of-type'     : PSEUDO_FLTYPE,
+            'only-of-type'     : PSEUDO_ONLYTYPE
+        },
         EVALUTE_ATTRIBUTE = {
-        '='  : ATTRIBUTE_EQUAL,
-        '$=' : ATTRIBUTE_END,
-        '^=' : ATTRIBUTE_START,
-        '*=' : ATTRIBUTE_CONTAIN,
-        '~=' : ATTRIBUTE_PART,
-        '|=' : ATTRIBUTE_EQUAL,
-        '!=' : ATTRIBUTE_NOT,
-        ''   : ATTRIBUTE_HAS
-    };
+            '='  : ATTRIBUTE_EQUAL,
+            '$=' : ATTRIBUTE_END,
+            '^=' : ATTRIBUTE_START,
+            '*=' : ATTRIBUTE_CONTAIN,
+            '~=' : ATTRIBUTE_PART,
+            '|=' : ATTRIBUTE_EQUAL,
+            '!=' : ATTRIBUTE_NOT,
+            ''   : ATTRIBUTE_HAS
+        },
+        EVALUTE_COMBINATOR = {
+            '>' : COMBINATOR_CHILD,
+            '+' : COMBINATOR_SIBLING,
+            '~' : COMBINATOR_GENERAL_SIBLING
+        }
+    ;
     
     /**
      * NodeList, HTMLCollectionを，Arrayに変換
@@ -237,8 +250,13 @@ Hayate || (function(win, doc, loc, nav) {
             }
 
             // traversal
-            // @todo issue: combinatorを考慮
-            rv = traversal(tagName, rv, specifier);
+            if (!!combinator) {
+                rv = _combinator(combinator, traversal, tagName, rv, specifier);
+            } else {
+                rv = traversal(tagName, rv, specifier);
+            }
+
+            rv = _uniqueness(rv);
 
             // filter (pseudo & attribute)
             if (!!token) {
@@ -351,7 +369,6 @@ Hayate || (function(win, doc, loc, nav) {
             } else {
                 tmp = toArray(root.getElementsByClassName(clazz));
                 if (tagName !== '*') {
-                    console.log(tagName);
                     var k = 0, r;
                     while (r = tmp[k++]) {
                         if (r.tagName === tagName) {
@@ -389,11 +406,115 @@ Hayate || (function(win, doc, loc, nav) {
      * @param {Array} elms
      * @param {String} comb
      */
-    function _combinator(elms, comb) {
+    function _combinator(comb, traversal, tagName, elms, specifier) {
+        var rv = [], evals = [], e,
+            i = 0, // 前処理
+            j = 0, // 後処理
+            cid, pe, uid, done = {};
 
+        cid = ++COMBINATE_ID;
 
+        switch (EVALUTE_COMBINATOR[comb]) {
+            case COMBINATOR_CHILD:
+                // 親要素候補に一律でcidを付与
+                while (e = elms[i++]) {
+                    e.cardinalId = cid;
+                }
 
-        return elms;
+                // 探索
+                elms = traversal(tagName, elms, specifier);
+
+                // 直接の親のcidが一致する要素のみreturn
+                while (e = elms[j++]) {
+                    if (e.parentNode.cardinalId === cid) {
+                        rv.push(e);
+                    }
+                }
+            break;
+            case COMBINATOR_SIBLING:
+                while (e = elms[i++]) {
+                    // 探索次元を親要素に繰り上げ
+                    pe  = e.parentNode;
+                    uid = pe.uniqueId || (pe.uniqueId = ++ELEMENT_UID);
+
+                    if (!done[uid]) {
+                        done[uid] = true;
+                        evals.push(pe);
+                    }
+
+                    // 隣接要素にcidを付与
+                    while (e = e.nextSibling) {
+                        if (e.nodeType === 1) {
+                            e.cardinalId = cid;
+                            break;
+                        }
+                    }
+                }
+                // 評価用要素で探索
+                elms = traversal(tagName, evals, specifier);
+
+                // cidが一致する要素のみreturn
+                while (e = elms[j++]) {
+                    if (e.cardinalId && e.cardinalId === cid) {
+                        rv.push(e);
+                    }
+                }
+            break;
+            case COMBINATOR_GENERAL_SIBLING:
+                while (e = elms[i++]) {
+                    // 探索次元を親要素に繰り上げ
+                    pe  = e.parentNode;
+                    uid = pe.uniqueId || (pe.uniqueId = ++ELEMENT_UID);
+
+                    if (!done[uid]) {
+                        done[uid] = true;
+                        evals.push(pe);
+                    }
+
+                    // 間接要素にcidを付与
+                    while (e = e.nextSibling) {
+                        if (e.nodeType === 1) {
+                            // cidが未定義 or 今巡のcidと異なるときのみ付与
+                            if (!e.cardinalId || e.cardinalId !== cid) {
+                                e.cardinalId = cid;
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // 評価用要素で探索
+                elms = traversal(tagName, evals, specifier);
+
+                // cidが一致する要素のみreturn
+                while (e = elms[j++]) {
+                    if (e.cardinalId && e.cardinalId === cid) {
+                        rv.push(e);
+                    }
+                }
+            break;
+        }
+
+        return rv;
+    }
+
+    /**
+     * 返却要素群のユニーク化
+     *
+     * @param {Array} elms
+     * @return {Array}
+     */
+    function _uniqueness(elms) {
+        var idx = {}, rv = [], e, i = 0, uid;
+        while (e = elms[i++]) {
+            uid = e.uniqueId || (e.uniqueId = ++ELEMENT_UID);
+            if (!idx[uid]) {
+                idx[uid] = true;
+                rv.push(e);
+            }
+        }
+        return rv;
     }
 
     /**
