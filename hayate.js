@@ -12,8 +12,9 @@ Hayate || (function(win, doc, loc, nav) {
 
     Hayate = query;
 
-    var oldIE   = /MSIE [678]/.test(nav.userAgent),
-        toArray = !!oldIE ? toArrayCopy : toArraySlice,
+    var oldIE       = /MSIE [678]/.test(nav.userAgent),
+        toArray     = !!oldIE ? toArrayCopy : toArraySlice,
+        mergeArray  = Array.prototype.push,
         IE_FIX_ATTR = {
             'class'     : 'className',
             'for'       : 'htmlFor',
@@ -23,6 +24,7 @@ Hayate || (function(win, doc, loc, nav) {
             rowspan     : 'rowSpan',
             frameborder : 'frameBorder'
         },
+
         INDEXED_STORE = {},
         INDEXED_COUNT = 0,
 
@@ -118,6 +120,7 @@ Hayate || (function(win, doc, loc, nav) {
             }
         return rv;
     }
+
     /**
      * NodeList, HTMLCollectionを，Arrayに変換
      *
@@ -125,26 +128,6 @@ Hayate || (function(win, doc, loc, nav) {
      */
     function toArraySlice(list) {
         return Array.prototype.slice.call(list);
-    }
-
-    /**
-     * arrayにlistを加える
-     *
-     * @param {Array} array
-     * @param {Object} list
-     */
-    function concatArray(array, list) {
-        if (!oldIE) {
-            return array.concat(Array.prototype.slice.call(list));
-        } else {
-            var j = array.length, i = list.length;
-            for (; i-->0;) {
-                if (i in list) {
-                    array[j++]= list[i];
-                }
-            }
-            return array;
-        }
     }
 
     /**
@@ -193,7 +176,7 @@ Hayate || (function(win, doc, loc, nav) {
             rv = [];
             i  = 0;
             while (expr = exprStack[i++]) {
-                rv = rv.concat(_selector(expr, root));
+                mergeArray.apply(rv, _selector(expr, root));
             }
         }
 
@@ -316,7 +299,6 @@ Hayate || (function(win, doc, loc, nav) {
                     }
                 }
             }
-
         }
         return rv;
     }
@@ -379,33 +361,31 @@ Hayate || (function(win, doc, loc, nav) {
      * @return {Array}
      */
     function _class(tagName, rootAry, clazz) {
-        var rv = [], i = 0, root, tmp;
+        var rv = [], i = 0, root, tmp, p = 0,
+            e, j = 0;
 
         tagName  = tagName.toUpperCase();
 
         while (root = rootAry[i++] ) {
             if (!root.getElementsByClassName) {
                 var elms    = root.getElementsByTagName(tagName),
-                    evClass = ' '+clazz+' ',
-                    j       = 0,
-                    e;
+                    evClass = ' '+clazz+' ';
 
                 while (e = elms[j++]) {
                     if ((' '+e.className+' ').indexOf(evClass) !== -1) {
-                        rv.push(e);
+                        rv[p++] = e;
                     }
                 }
             } else {
                 tmp = toArray(root.getElementsByClassName(clazz));
                 if (tagName !== '*') {
-                    var k = 0, r;
-                    while (r = tmp[k++]) {
-                        if (r.tagName === tagName) {
-                            rv.push(r);
+                    while (e = tmp[j++]) {
+                        if (e.tagName === tagName) {
+                            rv[p++] = e;
                         }
                     }
                 } else {
-                    rv = rv.concat(tmp);
+                    mergeArray.apply(rv, tmp);
                 }
             }
         }
@@ -423,7 +403,7 @@ Hayate || (function(win, doc, loc, nav) {
         var rv = [], i = 0, root;
 
         while (root = rootAry[i++]) {
-            rv = concatArray(rv, root.getElementsByTagName(tagName));
+            mergeArray.apply(rv, toArray(root.getElementsByTagName(tagName)));
         }
 
         return rv;
@@ -439,6 +419,7 @@ Hayate || (function(win, doc, loc, nav) {
         var rv = [], evals = [], e,
             i = 0, // 前処理
             j = 0, // 後処理
+            p = 0,
             cid, pe, uid, done = {};
 
         cid = ++COMBINATE_ID;
@@ -456,7 +437,7 @@ Hayate || (function(win, doc, loc, nav) {
                 // 直接の親のcidが一致する要素のみreturn
                 while (e = elms[j++]) {
                     if (e.parentNode.cardinalId === cid) {
-                        rv.push(e);
+                        rv[p++] = e;
                     }
                 }
             break;
@@ -485,7 +466,7 @@ Hayate || (function(win, doc, loc, nav) {
                 // cidが一致する要素のみreturn
                 while (e = elms[j++]) {
                     if (e.cardinalId && e.cardinalId === cid) {
-                        rv.push(e);
+                        rv[p++] = e;
                     }
                 }
             break;
@@ -519,12 +500,11 @@ Hayate || (function(win, doc, loc, nav) {
                 // cidが一致する要素のみreturn
                 while (e = elms[j++]) {
                     if (e.cardinalId && e.cardinalId === cid) {
-                        rv.push(e);
+                        rv[p++] = e;
                     }
                 }
             break;
         }
-
         return rv;
     }
 
@@ -535,12 +515,12 @@ Hayate || (function(win, doc, loc, nav) {
      * @return {Array}
      */
     function _uniqueness(elms) {
-        var idx = {}, rv = [], e, i = 0, uid;
+        var idx = {}, rv = [], e, i = 0, uid, p = 0;
         while (e = elms[i++]) {
             uid = e.uniqueId || (e.uniqueId = ++ELEMENT_UID);
             if (!idx[uid]) {
                 idx[uid] = true;
-                rv.push(e);
+                rv[p++] = e;
             }
         }
         return rv;
@@ -556,7 +536,7 @@ Hayate || (function(win, doc, loc, nav) {
      * @param {String} crit
      */
     function _attribute(elms, opr, attr, crit) {
-        var rv = [], e, i = 0;
+        var rv = [], e, i = 0, p = 0;
 
         crit = opr === '~' ? ' '+crit+' '
                            : crit;
@@ -565,49 +545,49 @@ Hayate || (function(win, doc, loc, nav) {
             case ATTRIBUTE_EQUAL :
                 while (e = elms[i++]) {
                     if (getAttr(e, attr) === crit) {
-                        rv.push(e);
+                        rv[p++] = e;
                     }
                 }
             break;
             case ATTRIBUTE_END:
                 while (e = elms[i++]) {
                     if (new RegExp(crit+'$').test(getAttr(e, attr))) {
-                        rv.push(e);
+                        rv[p++] = e;
                     }
                 }
             break;
             case ATTRIBUTE_START:
                 while (e = elms[i++]) {
                     if (getAttr(e, attr).indexOf(crit) === 0) {
-                        rv.push(e);
+                        rv[p++] = e;
                     }
                 }
             break;
             case ATTRIBUTE_CONTAIN:
                 while (e = elms[i++]) {
                     if (getAttr(e, attr).indexOf(crit) !== -1) {
-                        rv.push(e);
+                        rv[p++] = e;
                     }
                 }
             break;
             case ATTRIBUTE_PART:
                 while (e = elms[i++]) {
                     if ((' '+getAttr(e, attr)+' ').indexOf(crit) !== -1) {
-                        rv.push(e);
+                        rv[p++] = e;
                     }
                 }
             break;
             case ATTRIBUTE_NOT:
                 while (e = elms[i++]) {
                     if (getAttr(e, attr) !== crit) {
-                        rv.push(e);
+                        rv[p++] = e;
                     }
                 }
             break;
             case ATTRIBUTE_HAS:
                 while (e = elms[i++]) {
                     if (getAttr(e, attr) !== '') {
-                        rv.push(e);
+                        rv[p++] = e;
                     }
                 }
             break;
@@ -626,7 +606,6 @@ Hayate || (function(win, doc, loc, nav) {
      * @param {String} arg
      */
     function _pseudos(elms, pseudo, arg) {
-
         /**
          * nth-child等の引数をパースする
          *
@@ -651,7 +630,7 @@ Hayate || (function(win, doc, loc, nav) {
             return rv;
         }
 
-        var rv = [], i = 0, e,
+        var rv = [], i = 0, e, p = 0,
             flg, start, iter,
             pe,
             pos, node, args,
@@ -709,18 +688,18 @@ Hayate || (function(win, doc, loc, nav) {
                         // only-child
                         if (pseudo.indexOf('only') !== -1) {
                             if (e.onlyChild && e.onlyChild === true) {
-                                rv.push(e);
+                                rv[p++] = e;
                             }
                         // nth-child, nth-last-child
                         } else {
                             current = e.nodeIndex + args.fix;
                             if (!!args.n) {
                                 if (current % args.i === 0 && current / args.i >= 0) {
-                                    rv.push(e);
+                                    rv[p++] = e;
                                 }
                             } else {
                                 if (current === args.i) {
-                                    rv.push(e);
+                                    rv[p++] = e;
                                 }
                             }
                         }
@@ -732,7 +711,7 @@ Hayate || (function(win, doc, loc, nav) {
                         for (; node; node = node[iter]) {
                             if (node.nodeType === 1) {
                                 if (node === e) {
-                                    rv.push(e);
+                                    rv[p++] = e;
                                 } else {
                                     break;
                                 }
@@ -757,7 +736,7 @@ Hayate || (function(win, doc, loc, nav) {
                     }
                     while(e = elms[i++]) {
                         if (e[pseudo] !== void 0 && e[pseudo] === nots) {
-                            rv.push(e);
+                            rv[p++] = e;
                         }
                     }
                 break;
@@ -771,7 +750,7 @@ Hayate || (function(win, doc, loc, nav) {
                     i = 0;
                     while (e = elms[i++]) {
                         if (!e.uniqueId || !idx[e.uniqueId] ) {
-                            rv.push(e);
+                            rv[p++] = e;
                         }
                     }
                 break;
@@ -780,19 +759,19 @@ Hayate || (function(win, doc, loc, nav) {
                                    : doc.html;
                     while (e = elms[i++]) {
                         if (e === root.activeElement) {
-                            rv. push(e);
+                            rv[p++] = e;
                         }
                     }
                 break;
                 case PSEUDO_ROOT:
                     e = elms[0] ? elms[0].ownerDocument.html
                                 : doc.html;
-                    rv.push(e);
+                    rv[p++] = e;
                 break;
                 case PSEUDO_EMPTY:
                     while (e = elms[i++]) {
                         if (!e.firstChild) {
-                            rv.push(e);
+                            rv[p++] = e;
                         }
                     }
                 break;
@@ -800,7 +779,7 @@ Hayate || (function(win, doc, loc, nav) {
                     attr = location.hash.substr(1);
                     while (e = elms[i++]) {
                         if (e.id === attr) {
-                            rv.push(e);
+                            rv[p++] = e;
                         }
                     }
                 break;
@@ -808,7 +787,7 @@ Hayate || (function(win, doc, loc, nav) {
                     while(e = elms[i++]) {
                         attr = getAttr(e, 'lang');
                         if (!!attr && attr.indexOf(arg) === 0 ) {
-                            rv.push(e);
+                            rv[p++] = e;
                         }
                     }
                 break;
