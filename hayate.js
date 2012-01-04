@@ -1,5 +1,11 @@
 /**
  * Hayate.js
+ * 某アニメを見ながら書き始めたよセレクタエンジン習作
+ *
+ * Copyright (c) 2011 Ayumu Sato ( http://havelog.ayumusato.com )
+ *
+ * Licensed under the MIT license:
+ *  http://www.opensource.org/licenses/mit-license.php
  *
  * きっとたぶんSupport条件
  *  HTML文書オンリー
@@ -12,7 +18,9 @@ Hayate || (function(win, doc, loc, nav) {
 
     Hayate = query;
 
-    var oldIE       = /MSIE [678]/.test(nav.userAgent),
+    var qSA         = !!document.querySelectorAll,
+        oldIE       = /MSIE [678]/.test(nav.userAgent),
+        oldIE8      = (nav.userAgent.indexOf('MSIE 8') !== -1),
         toArray     = !!oldIE ? toArrayCopy : toArraySlice,
         mergeArray  = Array.prototype.push,
         IE_FIX_ATTR = {
@@ -35,28 +43,15 @@ Hayate || (function(win, doc, loc, nav) {
         COMBINATOR_SIBLING         = 2,
         COMBINATOR_GENERAL_SIBLING = 3,
 
-        PSEUDO_NTHCHILD   = 1,
-        PSEUDO_FLCHILD    = 2,
-        PSEUDO_NTHTYPE    = 3,
-        PSEUDO_FLTYPE     = 4,
-        PSEUDO_ONLYTYPE   = 5,
+        PSEUDO_NTHCHILD   = 1, PSEUDO_FLCHILD    = 2, PSEUDO_NTHTYPE    = 3,
+        PSEUDO_FLTYPE     = 4, PSEUDO_ONLYTYPE   = 5,
 
-        PSEUDO_UISTATE    = 1,
-        PSEUDO_NOT        = 2,
-        PSEUDO_FOCUS      = 3,
-        PSEUDO_ROOT       = 4,
-        PSEUDO_EMPTY      = 5,
-        PSEUDO_TARGET     = 6,
-        PSEUDO_LANG       = 7,
+        PSEUDO_UISTATE    = 1, PSEUDO_NOT        = 2, PSEUDO_FOCUS      = 3,
+        PSEUDO_ROOT       = 4, PSEUDO_EMPTY      = 5, PSEUDO_TARGET     = 6,
+        PSEUDO_LANG       = 7, PSEUDO_NOIMPLEMENT= 0,
 
-        PSEUDO_NOIMPLEMENT= 0,
-
-        ATTRIBUTE_EQUAL   = 1,
-        ATTRIBUTE_END     = 2,
-        ATTRIBUTE_START   = 3,
-        ATTRIBUTE_CONTAIN = 4,
-        ATTRIBUTE_PART    = 5,
-        ATTRIBUTE_NOT     = 6,
+        ATTRIBUTE_EQUAL   = 1, ATTRIBUTE_END     = 2, ATTRIBUTE_START   = 3,
+        ATTRIBUTE_CONTAIN = 4, ATTRIBUTE_PART    = 5, ATTRIBUTE_NOT     = 6,
         ATTRIBUTE_HAS     = 7
     ;
 
@@ -154,9 +149,8 @@ Hayate || (function(win, doc, loc, nav) {
     function query(expr, root) {
         var exprStack, i,
             RE_CONCISE = /^([a-z0-6]*)([.#]?)([\w\-_]*)$/,
-            matches, rv;
-
-        // @todo issue: 適宜ネイティブのquerySelectorAllと分岐する(IE8はpseudoの実装が半端なので注意)
+            matches, rv,
+            notAttr, ie8Pseudo;
 
         root = root || doc;
 
@@ -168,22 +162,31 @@ Hayate || (function(win, doc, loc, nav) {
             return _concise(matches[1] || '*', root, matches[3], matches[2]);
         }
 
-        if (expr.indexOf(',') === -1) {
-            rv = _selector(expr, root);
+        // [attr!="val"]はqSAに食わせると例外
+        notAttr   = (expr.indexOf('!=') !== -1);
+
+        // IE8は:not, :nth-*, :last-*, :only-* に対応しない
+        ie8Pseudo = (oldIE8 && /!=|:not|:nth|:last|:only/.test(expr));
+
+        if (qSA && !notAttr && !ie8Pseudo) {
+            // 通常のquerySelectorAllを使用
+            rv = toArray(root.querySelectorAll(expr));
         } else {
-            exprStack = expr.split(',');
+            if (expr.indexOf(',') === -1) {
+                rv = _selector(expr, root);
+            } else {
+                exprStack = expr.split(',');
 
-            rv = [];
-            i  = 0;
-            while (expr = exprStack[i++]) {
-                mergeArray.apply(rv, _selector(expr, root));
+                rv = [];
+                i  = 0;
+                while (expr = exprStack[i++]) {
+                    mergeArray.apply(rv, _selector(expr, root));
+                }
             }
+            // 要素のインデックスを初期化
+            INDEXED_STORE = {};
+            INDEXED_COUNT = 0;
         }
-
-        // 要素のインデックスを初期化
-        INDEXED_STORE = {};
-        INDEXED_COUNT = 0;
-
         return rv;
     }
 
@@ -275,7 +278,6 @@ Hayate || (function(win, doc, loc, nav) {
                 filterGroup = token.replace(/([[:])/g, ' $1').substr(1).split(' ');
                 fi = 0;
                 while (filter = filterGroup[fi++]) {
-
                     switch(filter.charAt(0)) {
                         case '[':
                             // attribute
@@ -446,12 +448,10 @@ Hayate || (function(win, doc, loc, nav) {
                     // 探索次元を親要素に繰り上げ
                     pe  = e.parentNode;
                     uid = pe.uniqueId || (pe.uniqueId = ++ELEMENT_UID);
-
                     if (!done[uid]) {
                         done[uid] = true;
                         evals.push(pe);
                     }
-
                     // 隣接要素にcidを付与
                     while (e = e.nextSibling) {
                         if (e.nodeType === 1) {
@@ -475,12 +475,10 @@ Hayate || (function(win, doc, loc, nav) {
                     // 探索次元を親要素に繰り上げ
                     pe  = e.parentNode;
                     uid = pe.uniqueId || (pe.uniqueId = ++ELEMENT_UID);
-
                     if (!done[uid]) {
                         done[uid] = true;
                         evals.push(pe);
                     }
-
                     // 間接要素にcidを付与
                     while (e = e.nextSibling) {
                         if (e.nodeType === 1) {
