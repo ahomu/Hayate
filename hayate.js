@@ -18,9 +18,12 @@ Hayate || (function(win, doc, loc, nav) {
 
     Hayate = query;
 
+    // ua detect
+    /MSIE (\d+)/.test(nav.userAgent);
+
     var qSA         = !!document.querySelectorAll,
-        oldIE       = /MSIE [678]/.test(nav.userAgent),
-        oldIE8      = (nav.userAgent.indexOf('MSIE 8') !== -1),
+        oldIE       = !!RegExp.$1 && RegExp.$1 < 9,
+        ie8         = !!RegExp.$1 && RegExp.$1 == 8,
         toArray     = !!oldIE ? toArrayCopy : toArraySlice,
         mergeArray  = Array.prototype.push,
         IE_FIX_ATTR = {
@@ -48,7 +51,7 @@ Hayate || (function(win, doc, loc, nav) {
 
         PSEUDO_UISTATE    = 1, PSEUDO_NOT        = 2, PSEUDO_FOCUS      = 3,
         PSEUDO_ROOT       = 4, PSEUDO_EMPTY      = 5, PSEUDO_TARGET     = 6,
-        PSEUDO_LANG       = 7, PSEUDO_NOIMPLEMENT= 0,
+        PSEUDO_LANG       = 7, PSEUDO_CONTAINS   = 8, PSEUDO_NOIMPLEMENT= 0,
 
         ATTRIBUTE_EQUAL   = 1, ATTRIBUTE_END     = 2, ATTRIBUTE_START   = 3,
         ATTRIBUTE_CONTAIN = 4, ATTRIBUTE_PART    = 5, ATTRIBUTE_NOT     = 6,
@@ -72,6 +75,7 @@ Hayate || (function(win, doc, loc, nav) {
             'checked'          : PSEUDO_UISTATE,
             'not'              : PSEUDO_NOT,
             'focus'            : PSEUDO_FOCUS,
+            'contains'         : PSEUDO_CONTAINS,    // 本来はIE8, 9オンリー
             'root'             : PSEUDO_ROOT,
             'empty'            : PSEUDO_EMPTY,
             'target'           : PSEUDO_TARGET,
@@ -82,7 +86,6 @@ Hayate || (function(win, doc, loc, nav) {
             'hover'            : PSEUDO_NOIMPLEMENT, // ダイナミック擬似クラス: 同上
             'active'           : PSEUDO_NOIMPLEMENT, // ダイナミック擬似クラス: 同上(:active はクリックしている要素の先祖も対象？)
             'selected'         : PSEUDO_NOIMPLEMENT, // ありそうでない妄想クラス
-            'contains'         : PSEUDO_NOIMPLEMENT, // IE8, 9オンリー
             'indeterminate'    : PSEUDO_NOIMPLEMENT  // いつかきっとそのうち
         },
         EVALUTE_ATTRIBUTE = {
@@ -150,7 +153,7 @@ Hayate || (function(win, doc, loc, nav) {
         var exprStack, i,
             RE_CONCISE = /^([a-z0-6]*)([.#]?)([\w\-_]*)$/,
             matches, rv,
-            notAttr, ie8Pseudo;
+            unknownToken, ie8pseudo;
 
         root = root || doc;
 
@@ -162,13 +165,13 @@ Hayate || (function(win, doc, loc, nav) {
             return _concise(matches[1] || '*', root, matches[3], matches[2]);
         }
 
-        // [attr!="val"]はqSAに食わせると例外
-        notAttr   = (expr.indexOf('!=') !== -1);
+        // [attr!="val"]と:containsは，qSAに食わせると例外
+        unknownToken = (/:contains|!=/.test(expr));
 
         // IE8は:not, :nth-*, :last-*, :only-* に対応しない
-        ie8Pseudo = (oldIE8 && /!=|:not|:nth|:last|:only/.test(expr));
+        ie8pseudo = (ie8 && /!=|:not|:nth|:last|:only/.test(expr));
 
-        if (qSA && !notAttr && !ie8Pseudo) {
+        if (qSA && !unknownToken && !ie8pseudo) {
             // 通常のquerySelectorAllを使用
             rv = toArray(root.querySelectorAll(expr));
         } else {
@@ -757,6 +760,13 @@ Hayate || (function(win, doc, loc, nav) {
                                    : doc.html;
                     while (e = elms[i++]) {
                         if (e === root.activeElement) {
+                            rv[p++] = e;
+                        }
+                    }
+                break;
+                case PSEUDO_CONTAINS:
+                    while (e = elms[i++]) {
+                        if ((e.textContent || e.innerText).indexOf(arg) !== -1) {
                             rv[p++] = e;
                         }
                     }
