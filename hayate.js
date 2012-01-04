@@ -1,8 +1,9 @@
 /**
  * Hayate.js
  *
- * ハヤテのごとくを見ながら作られたから
- * せめてSizzleを上回りたい
+ * きっとたぶんSupport条件
+ *  HTML文書オンリー
+ *  一部のpseudo(*-of-type, contains)に非対応
  */
 var Hayate;
 Hayate || (function(win, doc, loc, nav) {
@@ -38,6 +39,16 @@ Hayate || (function(win, doc, loc, nav) {
         PSEUDO_FLTYPE     = 4,
         PSEUDO_ONLYTYPE   = 5,
 
+        PSEUDO_UISTATE    = 1,
+        PSEUDO_NOT        = 2,
+        PSEUDO_FOCUS      = 3,
+        PSEUDO_ROOT       = 4,
+        PSEUDO_EMPTY      = 5,
+        PSEUDO_TARGET     = 6,
+        PSEUDO_LANG       = 7,
+
+        PSEUDO_NOIMPLEMENT= 0,
+
         ATTRIBUTE_EQUAL   = 1,
         ATTRIBUTE_END     = 2,
         ATTRIBUTE_START   = 3,
@@ -57,7 +68,25 @@ Hayate || (function(win, doc, loc, nav) {
             'nth-last-of-type' : PSEUDO_NTHTYPE,
             'first-of-type'    : PSEUDO_FLTYPE,
             'last-of-type'     : PSEUDO_FLTYPE,
-            'only-of-type'     : PSEUDO_ONLYTYPE
+            'only-of-type'     : PSEUDO_ONLYTYPE,
+
+            'enabled'          : PSEUDO_UISTATE,
+            'disabled'         : PSEUDO_UISTATE,
+            'checked'          : PSEUDO_UISTATE,
+            'not'              : PSEUDO_NOT,
+            'focus'            : PSEUDO_FOCUS,
+            'root'             : PSEUDO_ROOT,
+            'empty'            : PSEUDO_EMPTY,
+            'target'           : PSEUDO_TARGET,
+            'lang'             : PSEUDO_LANG,
+
+            'link'             : PSEUDO_NOIMPLEMENT, // リンク擬似クラス: 保留
+            'visited'          : PSEUDO_NOIMPLEMENT, // リンク擬似クラス: 同上
+            'hover'            : PSEUDO_NOIMPLEMENT, // ダイナミック擬似クラス: 同上
+            'active'           : PSEUDO_NOIMPLEMENT, // ダイナミック擬似クラス: 同上(:active はクリックしている要素の先祖も対象？)
+            'selected'         : PSEUDO_NOIMPLEMENT, // ありそうでない妄想クラス
+            'contains'         : PSEUDO_NOIMPLEMENT, // IE8, 9オンリー
+            'indeterminate'    : PSEUDO_NOIMPLEMENT  // いつかきっとそのうち
         },
         EVALUTE_ATTRIBUTE = {
             '='  : ATTRIBUTE_EQUAL,
@@ -187,10 +216,10 @@ Hayate || (function(win, doc, loc, nav) {
             tokenGroup,
             token,
             RE_DETECT_COMBINATOR = /^([>+~])/,
-            RE_DETECT_TAGNAME    = /^([a-z0-6]+)[#.[:]?/,
+            RE_DETECT_TAGNAME    = /^([a-z0-6*]+)[#.[:]?/,
             RE_DETECT_SPECIFIER  = /^([#.])([a-zA-Z0-9-_]+)/,
             RE_PARSE_ATTRIBUTE   = /^\[(.+?)([~^$*|!>]?=)(.+)\]$/,
-            RE_PARSE_PSEUDO      = /^:([a-z-]+)\(?([a-z-+\d]*)\)?$/,
+            RE_PARSE_PSEUDO      = /^:([a-z-]+)\(?([a-z-+\d.#>+~]*)\)?$/,
             matches,
             rv;
 
@@ -626,7 +655,9 @@ Hayate || (function(win, doc, loc, nav) {
             flg, start, iter,
             pe,
             pos, node, args,
-            current;
+            current,
+
+            root, nots, idx = {}, attr;
 
         if (pseudo.indexOf('-') !== -1) {
 
@@ -712,34 +743,78 @@ Hayate || (function(win, doc, loc, nav) {
                 case PSEUDO_NTHTYPE: // nth-of-type, nth-last-of-type
                 case PSEUDO_FLTYPE: // first-of-type, last-of-type
                 case PSEUDO_ONLYTYPE: // only-of-type
-                    throw new Error("pseudo 'of-type's are not implmented.");
+                default:
+                    throw new Error("pseudo '"+pseudo+"' is not implmented.");
                 break;
             }
         } else {
-            switch (pseudo) {
-                case 'root' :
+            switch (EVALUTE_PSEUDO[pseudo]) {
+                case PSEUDO_UISTATE:
+                    nots = true;
+                    if (pseudo === 'enabled') {
+                        pseudo = 'disabled';
+                        nots   = false;
+                    }
+                    while(e = elms[i++]) {
+                        if (e[pseudo] !== void 0 && e[pseudo] === nots) {
+                            rv.push(e);
+                        }
+                    }
                 break;
-                case 'empty' :
+                case PSEUDO_NOT :
+                    root = elms[0] ? elms[0].ownerDocument.html
+                                   : doc.html;
+                    nots = query(arg, root);
+                    while (node = nots[i++]) {
+                        idx[node.uniqueId] = true;
+                    }
+                    i = 0;
+                    while (e = elms[i++]) {
+                        if (!e.uniqueId || !idx[e.uniqueId] ) {
+                            rv.push(e);
+                        }
+                    }
                 break;
-                case 'link' :
+                case PSEUDO_FOCUS:
+                    root = elms[0] ? elms[0].ownerDocument.html
+                                   : doc.html;
+                    while (e = elms[i++]) {
+                        if (e === root.activeElement) {
+                            rv. push(e);
+                        }
+                    }
                 break;
-                case 'visited' :
+                case PSEUDO_ROOT:
+                    e = elms[0] ? elms[0].ownerDocument.html
+                                : doc.html;
+                    rv.push(e);
                 break;
-                case 'active' :
+                case PSEUDO_EMPTY:
+                    while (e = elms[i++]) {
+                        if (!e.firstChild) {
+                            rv.push(e);
+                        }
+                    }
                 break;
-                case 'hover' :
+                case PSEUDO_TARGET:
+                    attr = location.hash.substr(1);
+                    while (e = elms[i++]) {
+                        if (e.id === attr) {
+                            rv.push(e);
+                        }
+                    }
                 break;
-                case 'focus' :
+                case PSEUDO_LANG:
+                    while(e = elms[i++]) {
+                        attr = getAttr(e, 'lang');
+                        if (!!attr && attr.indexOf(arg) === 0 ) {
+                            rv.push(e);
+                        }
+                    }
                 break;
-                case 'target' :
-                break;
-                case 'lang' :
-                break;
-                case 'enabled' :
-                break;
-                case 'disabled' :
-                break;
-                case 'checked' :
+                case PSEUDO_NOIMPLEMENT:
+                default :
+                    throw new Error("pseudo '"+pseudo+"' is not implmented.");
                 break;
             }
         }
