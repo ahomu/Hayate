@@ -21,7 +21,7 @@ Hayate || (function(win, doc, loc, nav) {
     // ua detect
     /MSIE (\d+)/.test(nav.userAgent);
 
-    var qSA         = !!document.querySelectorAll,
+    var qSA         = !!doc.querySelectorAll,
         oldIE       = !!RegExp.$1 && RegExp.$1 < 9,
         ie8         = !!RegExp.$1 && RegExp.$1 == 8,
         toArray     = !!oldIE ? toArrayCopy : toArraySlice,
