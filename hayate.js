@@ -539,9 +539,6 @@ Hayate || (function(win, doc, loc, nav) {
     function _attribute(elms, opr, attr, crit) {
         var rv = [], e, i = 0, p = 0;
 
-        crit = opr === '~' ? ' '+crit+' '
-                           : crit;
-
         switch (EVALUTE_ATTRIBUTE[opr]) {
             case ATTRIBUTE_EQUAL :
                 while (e = elms[i++]) {
@@ -572,6 +569,7 @@ Hayate || (function(win, doc, loc, nav) {
                 }
             break;
             case ATTRIBUTE_PART:
+                crit =  ' '+crit+' ';
                 while (e = elms[i++]) {
                     if ((' '+getAttr(e, attr)+' ').indexOf(crit) !== -1) {
                         rv[p++] = e;
