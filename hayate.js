@@ -9,7 +9,7 @@
  *
  * きっとたぶんSupport条件
  *  HTML文書オンリー
- *  一部のpseudo(*-of-type, contains)に非対応
+ *  一部のpseudo(*-of-typeとかlink, dynamic擬似クラス)に非対応
  */
 var Hayate;
 Hayate || (function(win, doc, loc, nav) {
