@@ -1,6 +1,6 @@
 /**
  * Hayate.js
- * 某アニメを見ながら書き始めたよセレクタエンジン習作
+ * ♪はやてのように〜　♪ざぶんぐる〜　♪ざぶんぐる〜
  *
  * Copyright (c) 2011 Ayumu Sato ( http://havelog.ayumusato.com )
  *
@@ -10,23 +10,30 @@
  * きっとたぶんSupport条件
  *  HTML文書オンリー
  *  一部のpseudo(*-of-typeとかlink, dynamic擬似クラス)に非対応
+ *
+ * 精度面の制限
+ *  attribute -> 属性値に [ : , などの記号類が含まれると動作しない
+ *  pseudo    -> nth-child( 2n + 1 ) のように不要な空白を入れると動作しない
  */
-var Hayate;
-Hayate || (function(win, doc, loc, nav) {
+(function(win, doc, loc, nav) {
 
     "use strict";
 
-    Hayate = query;
+    win.Hayate = query;
 
     // ua detect
     /MSIE (\d+)/.test(nav.userAgent);
 
     var qSA         = !!doc.querySelectorAll,
-        oldIE       = !!RegExp.$1 && RegExp.$1 < 9,
-        ie8         = !!RegExp.$1 && RegExp.$1 == 8,
-        toArray     = !!oldIE ? toArrayCopy : toArraySlice,
+        ieVer       = parseFloat(RegExp.$1),
+        ieOld       = !!ieVer && ieVer <  9,
+        ie8         = !!ieVer && ieVer == 8,
+        toArray     = !!ieOld ? toArrayCopy : toArraySlice,
+        toString    = Object.prototype.toString,
         mergeArray  = Array.prototype.push,
-        IE_FIX_ATTR = {
+
+        TYPEOF_ARRAY = '[object Array]',
+        IE_FIX_ATTR  = {
             'class'     : 'className',
             'for'       : 'htmlFor',
             acesskey    : 'accessKey',
@@ -46,19 +53,21 @@ Hayate || (function(win, doc, loc, nav) {
         COMBINATOR_SIBLING         = 2,
         COMBINATOR_GENERAL_SIBLING = 3,
 
+        PSEUDO_UNDEFINED  = 0,
+
         PSEUDO_NTHCHILD   = 1, PSEUDO_FLCHILD    = 2, PSEUDO_NTHTYPE    = 3,
         PSEUDO_FLTYPE     = 4, PSEUDO_ONLYTYPE   = 5,
 
         PSEUDO_UISTATE    = 1, PSEUDO_NOT        = 2, PSEUDO_FOCUS      = 3,
         PSEUDO_ROOT       = 4, PSEUDO_EMPTY      = 5, PSEUDO_TARGET     = 6,
-        PSEUDO_LANG       = 7, PSEUDO_CONTAINS   = 8, PSEUDO_NOIMPLEMENT= 0,
+        PSEUDO_LANG       = 7, PSEUDO_CONTAINS   = 8,
 
         ATTRIBUTE_EQUAL   = 1, ATTRIBUTE_END     = 2, ATTRIBUTE_START   = 3,
         ATTRIBUTE_CONTAIN = 4, ATTRIBUTE_PART    = 5, ATTRIBUTE_NOT     = 6,
         ATTRIBUTE_HAS     = 7
     ;
 
-    var EVALUTE_PSEUDO = {
+    var EVALUATE_PSEUDO = {
             'only-child'       : PSEUDO_NTHCHILD,
             'nth-child'        : PSEUDO_NTHCHILD,
             'nth-last-child'   : PSEUDO_NTHCHILD,
@@ -75,20 +84,20 @@ Hayate || (function(win, doc, loc, nav) {
             'checked'          : PSEUDO_UISTATE,
             'not'              : PSEUDO_NOT,
             'focus'            : PSEUDO_FOCUS,
-            'contains'         : PSEUDO_CONTAINS,    // 本来はIE8, 9オンリー
+            'contains'         : PSEUDO_CONTAINS,
             'root'             : PSEUDO_ROOT,
             'empty'            : PSEUDO_EMPTY,
             'target'           : PSEUDO_TARGET,
             'lang'             : PSEUDO_LANG,
 
-            'link'             : PSEUDO_NOIMPLEMENT, // リンク擬似クラス: 保留
-            'visited'          : PSEUDO_NOIMPLEMENT, // リンク擬似クラス: 同上
-            'hover'            : PSEUDO_NOIMPLEMENT, // ダイナミック擬似クラス: 同上
-            'active'           : PSEUDO_NOIMPLEMENT, // ダイナミック擬似クラス: 同上(:active はクリックしている要素の先祖も対象？)
-            'selected'         : PSEUDO_NOIMPLEMENT, // ありそうでない妄想クラス
-            'indeterminate'    : PSEUDO_NOIMPLEMENT  // いつかきっとそのうち
+            'link'             : PSEUDO_UNDEFINED, // リンク擬似クラス: 保留
+            'visited'          : PSEUDO_UNDEFINED, // リンク擬似クラス: 同上
+            'hover'            : PSEUDO_UNDEFINED, // ダイナミック擬似クラス: 同上
+            'active'           : PSEUDO_UNDEFINED, // ダイナミック擬似クラス: 同上(:active はクリックしている要素の先祖も対象？)
+            'selected'         : PSEUDO_UNDEFINED, // ありそうでない妄想クラス
+            'indeterminate'    : PSEUDO_UNDEFINED  // いつかきっとそのうち
         },
-        EVALUTE_ATTRIBUTE = {
+        EVALUATE_ATTRIBUTE = {
             '='  : ATTRIBUTE_EQUAL,
             '$=' : ATTRIBUTE_END,
             '^=' : ATTRIBUTE_START,
@@ -98,13 +107,13 @@ Hayate || (function(win, doc, loc, nav) {
             '!=' : ATTRIBUTE_NOT,
             ''   : ATTRIBUTE_HAS
         },
-        EVALUTE_COMBINATOR = {
+        EVALUATE_COMBINATOR = {
             '>' : COMBINATOR_CHILD,
             '+' : COMBINATOR_SIBLING,
             '~' : COMBINATOR_GENERAL_SIBLING
         }
     ;
-    
+
     /**
      * NodeList, HTMLCollectionを，Arrayに変換
      *
@@ -136,7 +145,7 @@ Hayate || (function(win, doc, loc, nav) {
      * @return {String}
      */
     function getAttr(elm, key) {
-        if (!!oldIE && key in IE_FIX_ATTR) {
+        if (!!ieOld && key in IE_FIX_ATTR) {
             key = IE_FIX_ATTR[key];
         }
         return elm.getAttribute(key);
@@ -146,7 +155,7 @@ Hayate || (function(win, doc, loc, nav) {
      * クエリーセレクタ
      *
      * @param {String} expr
-     * @param {Node|Document} root
+     * @param {Node|Document|Array} root
      * @return {Array}
      */
     function query(expr, root) {
@@ -170,6 +179,8 @@ Hayate || (function(win, doc, loc, nav) {
 
         // IE8は:not, :nth-*, :last-*, :only-* に対応しない
         ie8pseudo = (ie8 && /!=|:not|:nth|:last|:only/.test(expr));
+
+        // @todo issue: Arrayのrootを受け取れるようにする
 
         if (qSA && !unknownToken && !ie8pseudo) {
             // 通常のquerySelectorAllを使用
@@ -201,9 +212,9 @@ Hayate || (function(win, doc, loc, nav) {
      * @return {Array}
      */
     function _selector(expr, root) {
-        var i = 0,
-            tokenGroup,
-            token,
+        var tokenGroup, token, i = 0,
+            filterGroup, filter, fi,
+            combinator, tagName, traversal, specifier,
             RE_DETECT_COMBINATOR = /^([>+~])/,
             RE_DETECT_TAGNAME    = /^([a-z0-6*]+)[#.[:]?/,
             RE_DETECT_SPECIFIER  = /^([#.])([a-zA-Z0-9-_]+)/,
@@ -237,9 +248,6 @@ Hayate || (function(win, doc, loc, nav) {
 
         // セレクタを評価単位に分割
         tokenGroup = expr.split(' ');
-
-        var combinator, tagName, traversal, specifier,
-            filterGroup, filter, fi;
 
         while (token = tokenGroup[i++]) {
             // default
@@ -313,22 +321,27 @@ Hayate || (function(win, doc, loc, nav) {
      * 簡潔なセレクタをより速く評価する
      *
      * @param {String} tagName
-     * @param {Node} root
+     * @param {Node|Document|Array} roots
      * @param {String} specifier
      * @param {String} by
      * @return {Array}
      */
-    function _concise(tagName, root, specifier, by) {
+    function _concise(tagName, roots, specifier, by) {
         var rv = [];
+
+        if (toString.call(roots) !== TYPEOF_ARRAY) {
+            roots = [roots];
+        }
+
         switch(by) {
             case '#':
-                rv = _ident(tagName, [root], specifier);
+                rv = _ident(tagName, roots, specifier);
             break;
             case '.':
-                rv = _class(tagName, [root], specifier);
+                rv = _class(tagName, roots, specifier);
             break;
             default:
-                rv = _tag(tagName, [root]);
+                rv = _tag(tagName, roots);
             break;
         }
         return rv;
@@ -338,17 +351,18 @@ Hayate || (function(win, doc, loc, nav) {
      * IDセレクタ
      *
      * @param {String} tagName
-     * @param {Array} root (document nodeがroot[0]に入ってくる前提)
+     * @param {Array} roots
      * @param {String} ident
      * @return {Array}
      */
-    function _ident(tagName, root, ident) {
+    function _ident(tagName, roots, ident) {
         var rv;
 
         tagName = tagName.toUpperCase();
-        root    = root[0].nodeType === 9 ? root[0] : root[0].ownerDocument;
+        // documentは先頭要素からサンプリングする
+        roots   = roots[0].nodeType >= 9 ? roots[0] : roots[0].ownerDocument;
 
-        rv = root.getElementById(ident);
+        rv = roots.getElementById(ident);
 
         if (rv && tagName === '*' || rv && rv.tagName === tagName) {
             return [rv];
@@ -361,17 +375,17 @@ Hayate || (function(win, doc, loc, nav) {
      * クラスセレクタ
      *
      * @param {String} tagName
-     * @param {Array} rootAry
+     * @param {Array} roots
      * @param {String} clazz
      * @return {Array}
      */
-    function _class(tagName, rootAry, clazz) {
+    function _class(tagName, roots, clazz) {
         var rv = [], i = 0, root, tmp, p = 0,
             e, j = 0;
 
         tagName  = tagName.toUpperCase();
 
-        while (root = rootAry[i++] ) {
+        while (root = roots[i++] ) {
             if (!root.getElementsByClassName) {
                 var elms    = root.getElementsByTagName(tagName),
                     evClass = ' '+clazz+' ';
@@ -401,13 +415,13 @@ Hayate || (function(win, doc, loc, nav) {
      * タグセレクタ
      *
      * @param {String} tagName
-     * @param {Array} rootAry
+     * @param {Array} roots
      * @return {Array}
      */
-    function _tag(tagName, rootAry) {
+    function _tag(tagName, roots) {
         var rv = [], i = 0, root;
 
-        while (root = rootAry[i++]) {
+        while (root = roots[i++]) {
             mergeArray.apply(rv, toArray(root.getElementsByTagName(tagName)));
         }
 
@@ -429,7 +443,7 @@ Hayate || (function(win, doc, loc, nav) {
 
         cid = ++COMBINATE_ID;
 
-        switch (EVALUTE_COMBINATOR[comb]) {
+        switch (EVALUATE_COMBINATOR[comb]) {
             case COMBINATOR_CHILD:
                 // 親要素候補に一律でcidを付与
                 while (e = elms[i++]) {
@@ -529,7 +543,6 @@ Hayate || (function(win, doc, loc, nav) {
 
     /**
      * 属性セレクタ（フィルタリング）
-     * []内に記号類が混ざると，事前パースの時点で撃沈するので単純な文字列を対象に使うつもりで（ようは低精度）
      *
      * @param {Array} elms
      * @param {String} opr
@@ -539,7 +552,7 @@ Hayate || (function(win, doc, loc, nav) {
     function _attribute(elms, opr, attr, crit) {
         var rv = [], e, i = 0, p = 0;
 
-        switch (EVALUTE_ATTRIBUTE[opr]) {
+        switch (EVALUATE_ATTRIBUTE[opr]) {
             case ATTRIBUTE_EQUAL :
                 while (e = elms[i++]) {
                     if (getAttr(e, attr) === crit) {
@@ -597,9 +610,6 @@ Hayate || (function(win, doc, loc, nav) {
     /**
      * 擬似クラスセレクタ（フィルタリング）
      *
-     * :opr(arg)
-     * arg内にホワイトスペースが含まれない前提でパース
-     *
      * @param {Array} elms
      * @param {String} pseudo
      * @param {String} arg
@@ -615,8 +625,7 @@ Hayate || (function(win, doc, loc, nav) {
             //        [2] n     n
             //        [3] sign  +|-
             //        [4] num   \d
-            var RE_ARG_PARSE = /^(\d*)(n?)([+-]?)(\d*)$/,
-                matches = RE_ARG_PARSE.exec(arg),
+            var matches = /^(\d*)(n?)([+-]?)(\d*)$/.exec(arg),
                 rv = {
                     i : ~~matches[1],
                     n : !!matches[2],
@@ -660,7 +669,7 @@ Hayate || (function(win, doc, loc, nav) {
                 iter  = 'previousSibling';
             }
 
-            switch (EVALUTE_PSEUDO[pseudo]) {
+            switch (EVALUATE_PSEUDO[pseudo]) {
                 case PSEUDO_NTHCHILD: // nth-child, nth-last-child, only-child
                     args = _argParse(arg);
 
@@ -718,15 +727,15 @@ Hayate || (function(win, doc, loc, nav) {
                         }
                     }
                 break;
-                case PSEUDO_NTHTYPE: // nth-of-type, nth-last-of-type
-                case PSEUDO_FLTYPE: // first-of-type, last-of-type
+                case PSEUDO_NTHTYPE:  // nth-of-type, nth-last-of-type
+                case PSEUDO_FLTYPE:   // first-of-type, last-of-type
                 case PSEUDO_ONLYTYPE: // only-of-type
                 default:
                     throw new Error("pseudo '"+pseudo+"' is not implmented.");
                 break;
             }
         } else {
-            switch (EVALUTE_PSEUDO[pseudo]) {
+            switch (EVALUATE_PSEUDO[pseudo]) {
                 case PSEUDO_UISTATE:
                     nots = true;
                     if (pseudo === 'enabled') {
@@ -782,7 +791,7 @@ Hayate || (function(win, doc, loc, nav) {
                     }
                 break;
                 case PSEUDO_TARGET:
-                    attr = location.hash.substr(1);
+                    attr = loc.hash.substr(1);
                     while (e = elms[i++]) {
                         if (e.id === attr) {
                             rv[p++] = e;
@@ -790,14 +799,14 @@ Hayate || (function(win, doc, loc, nav) {
                     }
                 break;
                 case PSEUDO_LANG:
-                    while(e = elms[i++]) {
+                    while (e = elms[i++]) {
                         attr = getAttr(e, 'lang');
                         if (!!attr && attr.indexOf(arg) === 0 ) {
                             rv[p++] = e;
                         }
                     }
                 break;
-                case PSEUDO_NOIMPLEMENT:
+                case PSEUDO_UNDEFINED:
                 default :
                     throw new Error("pseudo '"+pseudo+"' is not implmented.");
                 break;
