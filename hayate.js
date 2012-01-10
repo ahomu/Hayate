@@ -25,9 +25,10 @@
     /MSIE (\d+)/.test(nav.userAgent);
 
     var qSA         = !!doc.querySelectorAll,
+        gByCName    = !!doc.getElementsByClassName,
         ieVer       = parseFloat(RegExp.$1),
-        ieOld       = !!ieVer && ieVer <  9,
-        ie8         = !!ieVer && ieVer == 8,
+        ieOld       = !!ieVer && ieVer  <  9,
+        ie8         = !!ieVer && ieVer === 8,
         toArray     = !!ieOld ? toArrayCopy : toArraySlice,
         toString    = Object.prototype.toString,
         mergeArray  = Array.prototype.push,
@@ -118,6 +119,7 @@
      * NodeList, HTMLCollectionを，Arrayに変換
      *
      * @param {Object} list
+     * @return {Array}
      */
     function toArrayCopy(list) {
         var rv= new Array(list.length), i = list.length;
@@ -132,6 +134,7 @@
      * NodeList, HTMLCollectionを，Arrayに変換
      *
      * @param {Object} list
+     * @return {Array}
      */
     function toArraySlice(list) {
         return Array.prototype.slice.call(list);
@@ -380,22 +383,26 @@
      * @return {Array}
      */
     function _class(tagName, roots, clazz) {
-        var rv = [], i = 0, root, tmp, p = 0,
-            e, j = 0;
+        var rv = [], i = 0, root, p = 0,
+            e, j = 0,
+            elms, evClass,
+            tmp;
 
         tagName  = tagName.toUpperCase();
 
-        while (root = roots[i++] ) {
-            if (!root.getElementsByClassName) {
-                var elms    = root.getElementsByTagName(tagName),
-                    evClass = ' '+clazz+' ';
+        if (!gByCName) {
+            while (root = roots[i++] ) {
+                elms    = root.getElementsByTagName(tagName);
+                evClass = ' '+clazz+' ';
 
                 while (e = elms[j++]) {
                     if ((' '+e.className+' ').indexOf(evClass) !== -1) {
                         rv[p++] = e;
                     }
                 }
-            } else {
+            }
+        } else {
+            while (root = roots[i++] ) {
                 tmp = toArray(root.getElementsByClassName(clazz));
                 if (tagName !== '*') {
                     while (e = tmp[j++]) {
