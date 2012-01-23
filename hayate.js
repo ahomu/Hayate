@@ -2,7 +2,7 @@
  * Hayate.js
  * ♪はやてのように〜　♪ざぶんぐる〜　♪ざぶんぐる〜
  *
- * Copyright (c) 2011 Ayumu Sato ( http://havelog.ayumusato.com )
+ * Copyright (c) 2012 Ayumu Sato ( http://havelog.ayumusato.com )
  *
  * Licensed under the MIT license:
  *  http://www.opensource.org/licenses/mit-license.php
